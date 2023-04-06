@@ -139,7 +139,13 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="CanConverterProtocol.cpp" />
+    <ClCompile Include="CDC_ProcessLib.cpp" />
     <ClCompile Include="USB2CAN_dataFlowAnalysis.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="CanConverterProtocol.h" />
+    <ClInclude Include="CDC_ProcessLib.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
