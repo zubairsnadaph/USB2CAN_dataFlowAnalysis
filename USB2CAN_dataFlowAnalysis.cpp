@@ -7,8 +7,12 @@
 #include <stdlib.h>
 #include <fileapi.h>
 #include <sys/stat.h>
+#include <string.h>
+#include <sstream>
 #include "CanConverterProtocol.h"
 #include "CDC_ProcessLib.h"
+
+//using namespace std;
 
 #define elementSize 1 //read 1 byte at a time
 #define readFileName "C:\\HarmonyProjects_unreleasedInitialU2C\\U2C Aura pausing testing\\z1 up move dataonly data.csv"
@@ -16,7 +20,7 @@
 
 //const uint32_t numOfElements = 500; // make this equal to size of buf to which it will be written after the read operation
 uint8_t cdcProcessBuffer[numOfElements];
-char InOutACK[2][20] = { ",ACK\n", ",,ACK,\n" };
+char InOutACK[2][20] = { ",ACK\n", ",,ACK\n" };
 
 struct stat file_status;
 
@@ -29,6 +33,9 @@ void checkTheDatatoCopy(uint8_t* buf)
     uint8_t hexBuf[500] = { 0 };
     uint32_t hexBufCntr = 0;
     uint32_t dataStartIndex = 0;
+    uint32_t timestampData = 0;
+    char timeStampString[50] = { 0 };
+    std::string date = (char*)buf;
     
 
     for (int asciiCntr = 0; asciiCntr < strlen((char*)buf); asciiCntr++)
@@ -36,37 +43,57 @@ void checkTheDatatoCopy(uint8_t* buf)
         switch (commaDelimiterCntr)
         {
         case 1:
+            //dataStartIndex = asciiCntr; // save the instance to check the second delimiter
+            timestampData = 60 * std::strtol((char*)(buf + asciiCntr), NULL, 10); //receive the minute and convert to seconds
+            //snprintf(timeStampString, 50, "%d", 60 * timestampData);
+            asciiCntr = (int)date.find(":") + 1; // increment the index to seconds char
+
+            timestampData += std::strtol((char*)(buf + asciiCntr), NULL, 10); //receive seconds and add to converted seconds (above)
+            timestampData *= 1000000;// convert to microseconds
+            //snprintf(timeStampString + strlen(timeStampString), 50 - strlen(timeStampString), "%d", timestampData);
+            asciiCntr = (int)date.find(".") + 1; // increment the index to milli sec char
+            dataStartIndex = asciiCntr; // save the instance to check the second occurance of "."
+
+            timestampData += 1000 * std::strtol((char*)(buf + asciiCntr), NULL, 10); //receive milliseconds, convert to micro and add to previous
+            //snprintf(timeStampString + strlen(timeStampString), 50 - strlen(timeStampString), "%d", timestampData);
+            asciiCntr = (int)date.find(".", dataStartIndex) + 1; // increment the index to microsec char
+
+            timestampData += std::strtol((char*)(buf + asciiCntr), NULL, 10); //receive microseconds and add to previous
+            snprintf(timeStampString + strlen(timeStampString), 50 - strlen(timeStampString), "%d", timestampData);
+            asciiCntr = (int)date.find(",", dataStartIndex); // increment the index to ',',no +1 increment to satisfy the condition after breaking here
+            break;
+
+        case 2:
             if (bufSizeReadDone)
             {
                 break;
             }
             bufReadSize = (uint8_t)std::strtol((char*)buf + asciiCntr, NULL, 10);
             bufSizeReadDone = true;
-            dataStartIndex = asciiCntr - 1; // save to prevent overwrite of index column
-            /*if (bufReadSize == 3)
-            {
-                // comma already exists in the buf buffer at this point start writing at this current index
-                snprintf((char*)(buf + dataStartIndex), strlen(InOutACK[0]), "%s", InOutACK[strncmp("CDC IN", (char*)buf + asciiCntr + 4, strlen("CDC IN"))]);
-                return;
-            }*/
-            //asciiCntr += 3;
+            //dataStartIndex = asciiCntr - 1; // save to prevent overwrite of index column
             break;
 
-        case 2:
+        case 3:
             dataDirIN = 1 + strncmp("CDC IN", (char*)buf + asciiCntr, strlen("CDC IN")); //+1 since the comp returns -1 for CDC OUT and 0 for CDC IN
             asciiCntr += (12 - dataDirIN); // avoid reading the "CDC OUT DATA/CDC IN DATA" info
             break;
 
-        case 3:
+        case 4:
+            for (int dataCntr = 0; dataCntr < bufReadSize; dataCntr++) // convert the ascii data to numeric
+            {
+                hexBuf[dataCntr] = (uint8_t)std::strtol((char*)buf + asciiCntr + 3*dataCntr, NULL, 16);
+            }
+
+            snprintf((char*)(buf + (int)date.find(",") + 1), numOfElements, "%s.",timeStampString); // copy the filtered date into the buffer, \
+            //dot at the end to read the index at which point the writig will begin
+            date = (char*)buf;
+            dataStartIndex = (int)date.find(".");
+            buf[dataStartIndex] = 0; // overwrite the "."
+
             if (bufReadSize == 3) // the data is ACK IN/OUT
             {
                 snprintf((char*)(buf + dataStartIndex), strlen(InOutACK[dataDirIN]) + 1, "%s", InOutACK[dataDirIN]); // +1 for the NULL char
                 return;
-            }
-
-            for (int dataCntr = 0; dataCntr < bufReadSize; dataCntr++)
-            {
-                hexBuf[dataCntr] = (uint8_t)std::strtol((char*)buf + asciiCntr + 3*dataCntr, NULL, 16);
             }
 
             if (!dataDirIN) // Convert the CDC out data into the CAN message
@@ -80,15 +107,13 @@ void checkTheDatatoCopy(uint8_t* buf)
                     snprintf((char*)(buf + dataStartIndex), strlen(",BAD CRC\n") + 1, ",BAD CRC\n"); // +1 for the NULL char
                     return;
                 }
-                buf[dataStartIndex] = 0;
+                
                 CAN_Transmit_Data(hexBuf + 2, buf + dataStartIndex); //+2 to avoid reading the protocol bytes; 
                 return;
             }
             else // Convert the CDC IN data into the CAN message
             {
-                //buf[dataStartIndex] = ','; // change 0xEF to a comma to default the csv indent to second column space
-                //buf[dataStartIndex + 1] = 0; // change 0xEF to a comma to default the csv indent to second column space
-                buf[dataStartIndex] = 0;
+                
                 CAN_Receive_Data_Interpret(bufReadSize, hexBuf, buf + dataStartIndex); //+1 for move to one more column right
                 return;
             }
@@ -101,18 +126,6 @@ void checkTheDatatoCopy(uint8_t* buf)
             commaDelimiterCntr++;
         }
     }
-
-    /*if (bufCopy) // replace the string data in the buf with the hex data
-    {
-        memcpy(buf + dataStartIndex, hexBuf, hexBufCntr);
-        dataStartIndex = (uint32_t)strlen((char*)buf);
-
-        buf[dataStartIndex] = '\n';
-        buf[dataStartIndex + 1] = 0;
-        //strcat_s((char*)buf, strlen((char*)buf), "\n");
-    }
-
-    return bufCopy;*/
 }
 
 int main()
@@ -162,7 +175,7 @@ int main()
             return 0;
         }
 
-        fprintf_s(out_file, "Index, CDC OUT (ID RTR DATA), CDC IN (ID RTR DATA)\n"); // write the column headers
+        fprintf_s(out_file, "Index, Time (us), CDC OUT (ID RTR DATA), CDC IN (ID RTR DATA)\n"); // write the column headers
 
         while (sizetoCopy_Process)
         {

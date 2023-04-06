@@ -6,6 +6,7 @@
 void CAN_Transmit_Data(uint8_t * processBuffer, uint8_t *fileWriteBuf)
 {
     canDataStruct canOut = { 0 };
+    uint32_t burstCntr = 0; // used to control the column entry
     //canDataStruct canIn = { 0 };
     //uint32_t nextbufWriteIndex = 0;
 
@@ -25,15 +26,25 @@ void CAN_Transmit_Data(uint8_t * processBuffer, uint8_t *fileWriteBuf)
 
         dataCntr += (canOut.canDLC + 2);
 
-        //for(int t =0 ; t < canOut.canDLC; t)
-        snprintf((char *)(fileWriteBuf + strlen((char*)fileWriteBuf)), 6, ",%03x ", canOut.canID); // print the ID
+        burstCntr++;
+
+        
+        if (burstCntr > 1)// more than one CAN messages, indent the following messages by 2 columns
+        {
+            snprintf((char*)(fileWriteBuf + strlen((char*)fileWriteBuf)), 7, ",,%03x ", canOut.canID); // print the ID
+        }
+        else
+        {
+            snprintf((char*)(fileWriteBuf + strlen((char*)fileWriteBuf)), 6, ",%03x ", canOut.canID); // print the ID
+        }
+        
         snprintf((char*)fileWriteBuf + strlen((char*)fileWriteBuf), 3, "%x ", canOut.canRTR);// followed by RTR
         for (uint32_t dataCpyCntr = 0; dataCpyCntr < canOut.canDLC; dataCpyCntr++) // Followed by the data
         {
             snprintf((char*)fileWriteBuf + strlen((char*)fileWriteBuf), 4, "%02x ", canOut.canData[dataCpyCntr]);
         }
 
-        snprintf((char*)fileWriteBuf + strlen((char*)fileWriteBuf), strlen("\n,"), "\n"); // insert and new line for the next can message in the same USB packet
+        snprintf((char*)fileWriteBuf + strlen((char*)fileWriteBuf), strlen("\n "), "\n"); // insert and new line for the next can message in the same USB packet
         //nextbufWriteIndex = strlen((char*)fileWriteBuf);
     }
 }
@@ -42,6 +53,7 @@ void CAN_Receive_Data_Interpret(uint32_t bufReadSize, uint8_t *processBuffer, ui
 {
     uint32_t totalInU2CSize = bufReadSize;
     canDataStruct canIn = { 0 };
+    uint32_t burstCntr = 0; // used to control the column entry
 
     for (uint32_t totalInU2CSizeCntr = 0; totalInU2CSizeCntr < bufReadSize; ) // process the complete buffer
     {
@@ -53,23 +65,49 @@ void CAN_Receive_Data_Interpret(uint32_t bufReadSize, uint8_t *processBuffer, ui
             canIn.canRTR = (processBuffer[totalInU2CSizeCntr + 2] & 0x08) >> 3;
             canIn.canData = processBuffer + totalInU2CSizeCntr + 4;
 
-            snprintf((char*)(fileWriteBuf + strlen((char*)fileWriteBuf)), 7, ",,%03x ", canIn.canID); // +1 for the NULL char
+            if (burstCntr)
+            {
+                snprintf((char*)(fileWriteBuf + strlen((char*)fileWriteBuf)), 8, ",,,%03x ", canIn.canID); // +1 for the NULL char
+            }
+            else
+            {
+                snprintf((char*)(fileWriteBuf + strlen((char*)fileWriteBuf)), 7, ",,%03x ", canIn.canID); // +1 for the NULL char
+            }
+            
             snprintf((char*)fileWriteBuf + strlen((char*)fileWriteBuf), 3, "%x ", canIn.canRTR);// +1 for the NULL char
             for (uint32_t dataCpyCntr = 0; dataCpyCntr < canIn.canDLC; dataCpyCntr++) // +1 for the NULL char
             {
                 snprintf((char*)fileWriteBuf + strlen((char*)fileWriteBuf), 4, "%02x ", canIn.canData[dataCpyCntr]);// +1 for the NULL char
             }
-            snprintf((char*)fileWriteBuf + strlen((char*)fileWriteBuf), 2, "\n"); // insert and new line for the next can message in the same USB packet
+            snprintf((char*)fileWriteBuf + strlen((char*)fileWriteBuf), 5, "\n"); // insert and new line for the next can message in the same USB packet
             totalInU2CSizeCntr = 7 + canIn.canDLC;
             break;
         case 0x04:
-            snprintf((char*)fileWriteBuf + strlen((char*)fileWriteBuf), strlen(",,ACK\n") + 1, ",,ACK\n"); // +1 for the NULL char
+            if (burstCntr)
+            {
+                snprintf((char*)(fileWriteBuf + strlen((char*)fileWriteBuf)), strlen(",,,ACK\n") + 1, ",,,ACK\n"); // +1 for the NULL char
+            }
+            else
+            {
+                snprintf((char*)(fileWriteBuf + strlen((char*)fileWriteBuf)), strlen(",,ACK\n") + 1, ",,ACK\n"); // +1 for the NULL char
+            }
+            //snprintf((char*)fileWriteBuf + strlen((char*)fileWriteBuf), strlen("ACK\n") + 1, "ACK\n"); // +1 for the NULL char
             totalInU2CSizeCntr += 3; // EF 04 BE
             break;
         default: //non standard message received, put it in the buffer
-            snprintf((char*)fileWriteBuf + strlen((char*)fileWriteBuf), strlen(",,BAD MSG\n") + 1, ",,BAD MSG\n"); // +1 for the NULL char
+            if (burstCntr)
+            {
+                snprintf((char*)(fileWriteBuf + strlen((char*)fileWriteBuf)), strlen(",,,BAD MSG\n") + 1, ",,,BAD MSG\n"); // +1 for the NULL char
+            }
+            else
+            {
+                snprintf((char*)(fileWriteBuf + strlen((char*)fileWriteBuf)), strlen(",,BAD MSG\n") + 1, ",,BAD MSG\n"); // +1 for the NULL char
+            }
+            //snprintf((char*)fileWriteBuf + strlen((char*)fileWriteBuf), strlen("BAD MSG\n") + 1, "BAD MSG\n"); // +1 for the NULL char
             totalInU2CSizeCntr = bufReadSize;
             break;
         }
+
+        burstCntr++; // increment to indent the next messages by 3 columns
     }
 }
